@@ -1,0 +1,818 @@
+; Published as: 1 tax Difference
+
+; Created 02 May 22 - MG
+
+; Applicable PCC's 0*** * 2***
+
+; Purpose:
+
+; To assist agents in collecting outstanding Tax Amounts on Deffered Date *NDC* Tickets.
+
+; Scenario:  PNR booked on 03JAN with a DEP DTE of 23SEP, TAX in the PQ is: £414.00.  TDL = 15AUG. 
+;		     PAX pays a deposit of £X to 'confirm' the reservation.
+;		     Balance paid on 10AUG, however the Taxes are now likely to be higher.
+;			 How does the agent know what the new taxes are as there is NO PNR in the GDS to quote/requote?
+;			 ********
+
+; Solution:
+
+; 			  In order to find the correct Taxes, this Scribe Script will interrogate the user to enter the Itinerary details.
+;			The Itinerary details are sored as variables and used to construct a GK (passive) PNR.  The GK PNR is not committed (ER) to the Sabre Host - it is purely for information purposes.
+;			The GK PNR will match what is in the (invisible to us) NDC PNR held with the Airline.
+
+;			Step 1 - Get Historical Taxes
+;			  The GK PNR is then *Historically* Price Quoted and the Total Tax amount, and the (incorporated YQ Tax) are written to Variables.
+;			The Script then minuses the YQ Tax (YQ Tax is guaranteed) from the Total Tax to yield a 'Historical' Tax Amount.			
+
+;			Step 2 - Get Today's Taxes
+;			  The GK PNR is then Price Quoted and the Total Tax amount, and the (incorporated YQ Tax) are written to Variables.
+;			The Script then minuses the YQ Tax (YQ Tax is guaranteed) from the Total Tax to yield a 'Current' Tax Amount.	
+;
+;			Step 2 - Compare Historical & New Taxes
+;			  The Script now has enough information in memory to COMPARE the difference between the OLD and NEW taxes.
+;			IF a deficit is yielded by the calculation, the user is required to add that amount to the BackOffice system and collect the difference.
+
+; Last revision date: 01JUN22 - MG
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;Buttons:
+[@BTN_L20_0] = "Calculate Taxes"
+[@BTN_L10_0] = "Breakdown"
+[@BTN_L10_3] = "Feedback"
+[@BTN_8_0] = "Finish"
+[@BTN_L15_0] = "Send Feedback"
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+
+;Variables
+DEFINE [ORIG.PRICE=DECIMAL:7:OPT:::]
+DEFINE [NEW.PRICE=DECIMAL:7:OPT:::]
+DEFINE [ORIG.DATE=DATE:7:OPT:::]
+DEFINE [RETAIN#C=ANY::OPT:::]
+DEFINE [Email#C=ANY::OPT:::]
+DEFINE [Vibe#C=ANY::OPT:::]
+DEFINE [GDS#C=ANY::OPT:::]
+DEFINE [Direct#C=ANY::OPT:::]
+DEFINE [Via#C=ANY::OPT:::]
+DEFINE [TDL=DATE:5:OPT:::]
+DEFINE [APP.TDL=DATE:5:OPT:::]
+DEFINE [AIR=ALPHA:2:OPT:::]
+DEFINE [FOUND.IT=ALPHA:4:OPT:::]
+DEFINE [DATER=DATE:5:OPT:::]
+DEFINE [SmallWPBTaxes=DECIMAL:7:OPT:::]
+DEFINE [SmallWPNCSTaxes=DECIMAL:7:OPT:::]
+DEFINE [Collectable=DECIMAL:7:OPT:::]
+DEFINE [Via=ALPHA:4:OPT:::]
+DEFINE [SPACER=ANY:2:OPT:::]
+DEFINE [LINE.SPACER=ANY:40:OPT:::]
+[SPACER] = "--"
+DEFAULT [SPACER] = [SPACER]
+[LINE.SPACER] = "***************************************"
+DEFAULT [SPACER] = [SPACER]
+DEFINE [WPBYQ.TAX=DECIMAL:7:OPT:::]
+DEFINE [WPNCSYQ.TAX=DECIMAL:7:OPT:::]
+DEFINE [WPNCSXT.TAX=DECIMAL:7:OPT:::]
+DEFINE [WPBXT.TAX=DECIMAL:7:OPT:::]
+DEFINE [SmallWPBTaxey=DECIMAL:7:OPT:::]
+DEFINE [SmallWPNCSTaxey=DECIMAL:7:OPT:::]
+DEFINE [SmallWPBTaxec=DECIMAL:7:OPT:::]
+DEFINE [SmallWPNCSTaxec=DECIMAL:7:OPT:::]
+DEFINE [SmallWPBTaxei=DECIMAL:7:OPT:::]
+DEFINE [SmallWPNCSTaxei=DECIMAL:7:OPT:::]
+DEFINE [WPBYQ.TAY=DECIMAL:7:OPT:::]
+DEFINE [WPNCSYQ.TAY=DECIMAL:7:OPT:::]
+DEFINE [WPNCSXT.TAY=DECIMAL:7:OPT:::]
+DEFINE [WPBXT.TAY=DECIMAL:7:OPT:::]
+DEFINE [Collectably=DECIMAL:7:OPT:::]
+DEFINE [WPBYQ.TAC=DECIMAL:7:OPT:::]
+DEFINE [WPNCSYQ.TAC=DECIMAL:7:OPT:::]
+DEFINE [WPNCSXT.TAC=DECIMAL:7:OPT:::]
+DEFINE [WPBXT.TAC=DECIMAL:7:OPT:::]
+DEFINE [Collectablc=DECIMAL:7:OPT:::]
+DEFINE [WPBYQ.TAI=DECIMAL:7:OPT:::]
+DEFINE [WPNCSYQ.TAI=DECIMAL:7:OPT:::]
+DEFINE [WPNCSXT.TAI=DECIMAL:7:OPT:::]
+DEFINE [WPBXT.TAI=DECIMAL:7:OPT:::]
+DEFINE [Collectabli=DECIMAL:7:OPT:::]
+DEFINE [BOOK.DTE=DATE:7:OPT:::]
+DEFINE [BOOK.AGT=ALPHA:2:OPT:::]
+DEFINE [LOC=ALPHA:6:OPT:::]
+DEFINE [PQ.COUNT=NUM:1:OPT:::]
+DEFINE [JCB=NUM:1:OPT:::]
+DEFINE [J14=NUM:1:OPT:::]
+DEFINE [JNN=NUM:1:OPT:::]
+DEFINE [JNF=NUM:1:OPT:::]
+DEFINE [DEBUG#C=ANY::OPT:::]
+DEFINE [QC.OPTIMUM=NUM:1:OPT:::Optimum Score for Quality Control]
+DEFINE [MSG.TEXT.1=A/N:35:OPT:::]
+DEFINE [MSG.TEXT.2=A/N:35:OPT:::]
+DEFINE [MSG.TEXT.3=A/N:35:OPT:::]
+DEFINE [MSG.TEXT.4=A/N:35:OPT:::]
+DEFINE [MSG.TEXT.5=A/N:35:OPT:::]
+DEFINE [MSG.TEXT.6=A/N:35:OPT:::]
+DEFINE [MSG.TEXT.1.FLAG=ALPHA:1:OPT:::]
+DEFINE [MSG.TEXT.2.FLAG=ALPHA:1:OPT:::]
+DEFINE [MSG.TEXT.3.FLAG=ALPHA:1:OPT:::]
+DEFINE [MSG.TEXT.4.FLAG=ALPHA:1:OPT:::]
+DEFINE [MSG.TEXT.5.FLAG=ALPHA:1:OPT:::]
+DEFINE [MSG.TEXT.6.FLAG=ALPHA:1:OPT:::]
+DEFINE [NEW.FARE.BASIS1=ANY:20:OPT:::]
+DEFINE [NEW.FARE.BASIS2=ANY:20:OPT:::]
+DEFINE [NEW.FARE.BASIS3=ANY:20:OPT:::]
+DEFINE [NEW.FARE.BASIS4=ANY:20:OPT:::]
+DEFINE [ORIG.F.BASIS1=ANY:20:OPT:::]
+DEFINE [ORIG.F.BASIS2=ANY:20:OPT:::]
+DEFINE [XT.TAX.ORIG=DECIMAL:7:OPT:::]
+DEFINE [XT.TAX=DECIMAL:7:OPT:::]
+EXTERNAL [XT.TAX.ORIG]
+EXTERNAL [XT.TAX]
+DEFINE [YQ.TAX#C=ANY::OPT:::] 
+DEFINE [DD.TAX#C=ANY::OPT:::] 
+DEFINE [WE.TAX#C=ANY::OPT:::] 
+DEFINE [I1.TAX#C=ANY::OPT:::] 
+DEFINE [I4.TAX#C=ANY::OPT:::] 
+DEFINE [DI.TAX#C=ANY::OPT:::] 
+DEFINE [JG.TAX#C=ANY::OPT:::] 
+DEFINE [JH.TAX#C=ANY::OPT:::] 
+DEFINE [M3.TAX#C=ANY::OPT:::] 
+DEFINE [YJ.TAX#C=ANY::OPT:::] 
+DEFINE [JT.TAX#C=ANY::OPT:::] 
+DEFINE [XT.TAX#C=ANY::OPT:::] 
+DEFINE [J4.TAX#C=ANY::OPT:::] 
+DEFINE [QK.TAX#C=ANY::OPT:::] 
+DEFINE [LC.TAX#C=ANY::OPT:::] 
+DEFINE [II.TAX#C=ANY::OPT:::] 
+DEFINE [IJ.TAX#C=ANY::OPT:::] 
+DEFINE [J1.TAX#C=ANY::OPT:::] 
+DEFINE [SH.TAX#C=ANY::OPT:::] 
+DEFINE [UB.TAX#C=ANY::OPT:::] 
+DEFINE [OS.TAX#C=ANY::OPT:::] 
+DEFINE [YV.TAX#C=ANY::OPT:::] 
+DEFINE [FF.TAX#C=ANY::OPT:::] 
+DEFINE [WD.TAX#C=ANY::OPT:::] 
+DEFINE [EK.TAX#C=ANY::OPT:::] 
+DEFINE [EL.TAX#C=ANY::OPT:::] 
+DEFINE [HG.TAX#C=ANY::OPT:::] 
+DEFINE [UC.TAX#C=ANY::OPT:::] 
+DEFINE [J3.TAX#C=ANY::OPT:::] 
+DEFINE [J5.TAX#C=ANY::OPT:::] 
+DEFINE [J6.TAX#C=ANY::OPT:::] 
+DEFINE [EW.TAX#C=ANY::OPT:::] 
+DEFINE [VW.TAX#C=ANY::OPT:::] 
+DEFINE [JY.TAX#C=ANY::OPT:::] 
+DEFINE [KS.TAX#C=ANY::OPT:::] 
+DEFINE [GB.TAX#C=ANY::OPT:::] 
+DEFINE [SELECTED#C=DECIMAL::OPT:::] 
+DEFINE [SELECT.TAX.TTL=DECIMAL:7:OPT:::]
+;* TAX VARIABLES START******************************************
+DEFINE [QK.TAX=DECIMAL:7:OPT:::]
+DEFINE [VW.TAX=DECIMAL:7:OPT:::]
+DEFINE [SH.TAX=DECIMAL:7:OPT:::]
+DEFINE [YQ.TAX=DECIMAL:7:OPT:::]
+DEFINE [GB.TAX=DECIMAL:7:OPT:::]
+DEFINE [UB.TAX=DECIMAL:7:OPT:::]
+DEFINE [DD.TAX=DECIMAL:7:OPT:::]
+DEFINE [WE.TAX=DECIMAL:7:OPT:::]
+DEFINE [I1.TAX=DECIMAL:7:OPT:::]
+DEFINE [I4.TAX=DECIMAL:7:OPT:::]
+DEFINE [DI.TAX=DECIMAL:7:OPT:::]
+DEFINE [JG.TAX=DECIMAL:7:OPT:::]
+DEFINE [JH.TAX=DECIMAL:7:OPT:::]
+DEFINE [M3.TAX=DECIMAL:7:OPT:::]
+DEFINE [YJ.TAX=DECIMAL:7:OPT:::]
+DEFINE [WD.TAX=DECIMAL:7:OPT:::]
+DEFINE [EK.TAX=DECIMAL:7:OPT:::] 
+DEFINE [EL.TAX=DECIMAL:7:OPT:::] 
+DEFINE [HG.TAX=DECIMAL:7:OPT:::] 
+DEFINE [JT.TAX=DECIMAL:7:OPT:::] 
+DEFINE [UC.TAX=DECIMAL:7:OPT:::] 
+DEFINE [YV.TAX=DECIMAL:7:OPT:::]
+DEFINE [FF.TAX=DECIMAL:7:OPT:::]
+DEFINE [OS.TAX=DECIMAL:7:OPT:::]
+DEFINE [LC.TAX=DECIMAL:7:OPT:::] 
+DEFINE [EW.TAX=DECIMAL:7:OPT:::] 
+DEFINE [IJ.TAX=DECIMAL:7:OPT:::] 
+DEFINE [II.TAX=DECIMAL:7:OPT:::] 
+DEFINE [J1.TAX=DECIMAL:7:OPT:::] 
+DEFINE [KS.TAX=DECIMAL:7:OPT:::] 
+DEFINE [J3.TAX=DECIMAL:7:OPT:::] 
+DEFINE [J4.TAX=DECIMAL:7:OPT:::] 
+DEFINE [J5.TAX=DECIMAL:7:OPT:::] 
+DEFINE [J6.TAX=DECIMAL:7:OPT:::]
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+DEFINE [QK.TAX.DIFF=DECIMAL:7:OPT:::]
+DEFINE [VW.TAX.DIFF=DECIMAL:7:OPT:::]
+DEFINE [SH.TAX.DIFF=DECIMAL:7:OPT:::]
+DEFINE [YQ.TAX.DIFF=DECIMAL:7:OPT:::]
+DEFINE [GB.TAX.DIFF=DECIMAL:7:OPT:::]
+DEFINE [UB.TAX.DIFF=DECIMAL:7:OPT:::]
+DEFINE [DD.TAX.DIFF=DECIMAL:7:OPT:::]
+DEFINE [WE.TAX.DIFF=DECIMAL:7:OPT:::]
+DEFINE [I1.TAX.DIFF=DECIMAL:7:OPT:::]
+DEFINE [I4.TAX.DIFF=DECIMAL:7:OPT:::]
+DEFINE [DI.TAX.DIFF=DECIMAL:7:OPT:::]
+DEFINE [JG.TAX.DIFF=DECIMAL:7:OPT:::]
+DEFINE [JH.TAX.DIFF=DECIMAL:7:OPT:::]
+DEFINE [M3.TAX.DIFF=DECIMAL:7:OPT:::]
+DEFINE [YJ.TAX.DIFF=DECIMAL:7:OPT:::]
+DEFINE [WD.TAX.DIFF=DECIMAL:7:OPT:::]
+DEFINE [EK.TAX.DIFF=DECIMAL:7:OPT:::] 
+DEFINE [EL.TAX.DIFF=DECIMAL:7:OPT:::] 
+DEFINE [HG.TAX.DIFF=DECIMAL:7:OPT:::] 
+DEFINE [JT.TAX.DIFF=DECIMAL:7:OPT:::] 
+DEFINE [UC.TAX.DIFF=DECIMAL:7:OPT:::] 
+DEFINE [YV.TAX.DIFF=DECIMAL:7:OPT:::]
+DEFINE [FF.TAX.DIFF=DECIMAL:7:OPT:::]
+DEFINE [OS.TAX.DIFF=DECIMAL:7:OPT:::]
+DEFINE [LC.TAX.DIFF=DECIMAL:7:OPT:::] 
+DEFINE [EW.TAX.DIFF=DECIMAL:7:OPT:::] 
+DEFINE [IJ.TAX.DIFF=DECIMAL:7:OPT:::] 
+DEFINE [II.TAX.DIFF=DECIMAL:7:OPT:::] 
+DEFINE [J1.TAX.DIFF=DECIMAL:7:OPT:::] 
+DEFINE [KS.TAX.DIFF=DECIMAL:7:OPT:::] 
+DEFINE [J3.TAX.DIFF=DECIMAL:7:OPT:::] 
+DEFINE [J4.TAX.DIFF=DECIMAL:7:OPT:::] 
+DEFINE [J5.TAX.DIFF=DECIMAL:7:OPT:::] 
+DEFINE [J6.TAX.DIFF=DECIMAL:7:OPT:::] 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+DEFINE [QK.TAX.ORIG=DECIMAL:7:OPT:::]
+DEFINE [OS.TAX.ORIG=DECIMAL:7:OPT:::]
+DEFINE [VW.TAX.ORIG=DECIMAL:7:OPT:::]
+DEFINE [SH.TAX.ORIG=DECIMAL:7:OPT:::]
+DEFINE [YQ.TAX.ORIG=DECIMAL:7:OPT:::]
+DEFINE [GB.TAX.ORIG=DECIMAL:7:OPT:::]
+DEFINE [UB.TAX.ORIG=DECIMAL:7:OPT:::]
+DEFINE [DD.TAX.ORIG=DECIMAL:7:OPT:::]
+DEFINE [WE.TAX.ORIG=DECIMAL:7:OPT:::]
+DEFINE [I1.TAX.ORIG=DECIMAL:7:OPT:::]
+DEFINE [I4.TAX.ORIG=DECIMAL:7:OPT:::]
+DEFINE [DI.TAX.ORIG=DECIMAL:7:OPT:::]
+DEFINE [JG.TAX.ORIG=DECIMAL:7:OPT:::]
+DEFINE [JH.TAX.ORIG=DECIMAL:7:OPT:::]
+DEFINE [M3.TAX.ORIG=DECIMAL:7:OPT:::]
+DEFINE [YJ.TAX.ORIG=DECIMAL:7:OPT:::]
+DEFINE [YV.TAX.ORIG=DECIMAL:7:OPT:::]
+DEFINE [FF.TAX.ORIG=DECIMAL:7:OPT:::]
+DEFINE [WD.TAX.ORIG=DECIMAL:7:OPT:::] 
+DEFINE [EK.TAX.ORIG=DECIMAL:7:OPT:::] 
+DEFINE [EL.TAX.ORIG=DECIMAL:7:OPT:::] 
+DEFINE [HG.TAX.ORIG=DECIMAL:7:OPT:::] 
+DEFINE [JT.TAX.ORIG=DECIMAL:7:OPT:::] 
+DEFINE [UC.TAX.ORIG=DECIMAL:7:OPT:::] 
+DEFINE [LC.TAX.ORIG=DECIMAL:7:OPT:::] 
+DEFINE [EW.TAX.ORIG=DECIMAL:7:OPT:::] 
+DEFINE [IJ.TAX.ORIG=DECIMAL:7:OPT:::] 
+DEFINE [II.TAX.ORIG=DECIMAL:7:OPT:::] 
+DEFINE [J1.TAX.ORIG=DECIMAL:7:OPT:::] 
+DEFINE [KS.TAX.ORIG=DECIMAL:7:OPT:::]
+DEFINE [J3.TAX.ORIG=DECIMAL:7:OPT:::] 
+DEFINE [J4.TAX.ORIG=DECIMAL:7:OPT:::] 
+DEFINE [J5.TAX.ORIG=DECIMAL:7:OPT:::] 
+DEFINE [J6.TAX.ORIG=DECIMAL:7:OPT:::]  
+
+EXTERNAL [QK.TAX.ORIG]
+EXTERNAL [QK.TAX]
+
+;***************************************************** UVF TAXES
+
+EXTERNAL [LC.TAX]
+EXTERNAL [EW.TAX]
+EXTERNAL [IJ.TAX]
+EXTERNAL [II.TAX]
+EXTERNAL [J1.TAX]
+EXTERNAL [KS.TAX]
+EXTERNAL [LC.TAX.ORIG]
+EXTERNAL [EW.TAX.ORIG]
+EXTERNAL [IJ.TAX.ORIG]
+EXTERNAL [II.TAX.ORIG]
+EXTERNAL [J1.TAX.ORIG]
+EXTERNAL [KS.TAX.ORIG]
+;***************************************************** UVF TAXES
+EXTERNAL [WD.TAX.ORIG]
+EXTERNAL [EK.TAX.ORIG]
+EXTERNAL [EL.TAX.ORIG]
+EXTERNAL [HG.TAX.ORIG]
+EXTERNAL [JT.TAX.ORIG]
+EXTERNAL [UC.TAX.ORIG]
+EXTERNAL [YV.TAX.ORIG]
+EXTERNAL [FF.TAX.ORIG]
+EXTERNAL [YQ.TAX.ORIG]
+EXTERNAL [GB.TAX.ORIG]
+EXTERNAL [UB.TAX.ORIG]
+EXTERNAL [DD.TAX.ORIG]
+EXTERNAL [WE.TAX.ORIG]
+EXTERNAL [I1.TAX.ORIG]
+EXTERNAL [I4.TAX.ORIG]
+EXTERNAL [DI.TAX.ORIG]
+EXTERNAL [JG.TAX.ORIG]
+EXTERNAL [JH.TAX.ORIG]
+EXTERNAL [M3.TAX.ORIG]
+EXTERNAL [J3.TAX.ORIG]
+EXTERNAL [J4.TAX.ORIG]
+EXTERNAL [J5.TAX.ORIG]
+EXTERNAL [J6.TAX.ORIG]
+EXTERNAL [WD.TAX]
+EXTERNAL [EK.TAX]
+EXTERNAL [EL.TAX]
+EXTERNAL [HG.TAX]
+EXTERNAL [JT.TAX]
+EXTERNAL [UC.TAX]
+EXTERNAL [SH.TAX]
+EXTERNAL [OS.TAX]
+EXTERNAL [YV.TAX]
+EXTERNAL [FF.TAX]
+EXTERNAL [YJ.TAX]
+EXTERNAL [YQ.TAX]
+EXTERNAL [GB.TAX]
+EXTERNAL [UB.TAX]
+EXTERNAL [DD.TAX]
+EXTERNAL [WE.TAX]
+EXTERNAL [I1.TAX]
+EXTERNAL [I4.TAX]
+EXTERNAL [DI.TAX]
+EXTERNAL [JG.TAX]
+EXTERNAL [JH.TAX]
+EXTERNAL [M3.TAX]
+EXTERNAL [J3.TAX]
+EXTERNAL [J4.TAX]
+EXTERNAL [J5.TAX]
+EXTERNAL [J6.TAX]
+EXTERNAL [ORIG.DATE]
+EXTERNAL [ORIG.F.BASIS1]
+EXTERNAL [ORIG.F.BASIS2]
+EXTERNAL [ORIG.PRICE]
+EXTERNAL [NEW.PRICE]
+EXTERNAL [NEW.FARE.BASIS1]
+EXTERNAL [NEW.FARE.BASIS2]
+EXTERNAL [NEW.FARE.BASIS3]
+EXTERNAL [NEW.FARE.BASIS4]
+EXTERNAL [JCB]
+EXTERNAL [J14]
+EXTERNAL [JNN]
+EXTERNAL [JNF]
+EXTERNAL [DEBUG#C]
+EXTERNAL [QC.OPTIMUM]
+EXTERNAL [PQ.COUNT]
+
+; Imported from a Different Project, hence different Naming Convention for Variables#
+DEFINE [From=ALPHA:3:MAND:::]
+DEFAULT [From] = "LHR"
+DEFINE [To=ALPHA:3:MAND:::]
+;DEFAULT [To] = "BGI"
+DEFINE [Booked=DATE:7:MAND:::]
+;DEFAULT [Booked] = "12JAN22"
+DEFINE [Air=ALPHA:2:MAND:::]
+DEFAULT [Air] = "BA"
+DEFINE [Dep.Date=DATE:5:MAND:::]
+;DEFAULT [Dep.Date] = "23SEP"
+DEFINE [Ret.Date=DATE:5:MAND:::]
+;DEFAULT [Ret.Date] = "02OCT"
+
+
+
+ONEMORE:
+; Interrogate the User to provide the NDC Flight Information.
+; This can be obtained from the Itinerary Information in The BackOffice System.
+; Information passed must reflect exactly what is in the NDC PNR.
+
+WINDOW H=" Tax App - Newmont.  Released: 16May22 " R=01 C=25
+^B*            	^R*	^B* 																																		    ^
+Please enter the NDC Flight Information Below.
+
+^R*  ^b*            										  																			  ^
+From Airport:	[From] (LHR/LGW/MAN/BHX)
+
+^R*^b*            										    ^
+To Airport:		[To]
+
+^R*      ^b*            										    ^
+Departure Date:	[Dep.Date]
+
+^R*   ^b*            										    ^
+Return Date:	[Ret.Date]
+
+^R*    ^b*            																																		    ^
+Booking Date: = [Booked] (DDMMMYY)
+
+^b*            										    ^
+Airline:		[Air]
+
+	[@HELP]								[@BTN_L20_0]						
+ENDWINDOW
+
+
+DEFAULT [To] = [To]																					; Defaults the [To] Data in the Variable so that it can be displayed in the Sabre Screen
+DEFAULT [Dep.Date] = [Dep.Date]																		; Defaults the [Dep.Date] Data in the Variable so that it can be displayed in the Sabre Screen
+DEFAULT [Ret.Date] = [Ret.Date]																		; Defaults the [Ret.Date] Data in the Variable so that it can be displayed in the Sabre Screen
+DEFAULT [Booked] = [Booked]																			; Defaults the [Booked]	Data in the Variable so that it can be displayed in the Sabre Screen
+
+IF [To] = "BIG" THEN GOTO ONEMORE ENDIF																; Common misspelling of the IATA Code for BGI - if encountered, sends the user back to try again.
+IF [To] = "ANI" THEN GOTO ONEMORE ENDIF																; Common misspelling of the IATA Code for ANU - if encountered, sends the user back to try again.
+IF [To] = "GBI" THEN GOTO ONEMORE ENDIF																; Common misspelling of the IATA Code for BGI - if encountered, sends the user back to try again.
+IF [To] = "ANI" THEN GOTO ONEMORE ENDIF																; Common misspelling of the IATA Code for ANU - if encountered, sends the user back to try again.
+IF [To] = "PSO" THEN GOTO ONEMORE ENDIF																; Common misspelling of the IATA Code for POS - if encountered, sends the user back to try again.
+IF [To] = "SDV" THEN GOTO ONEMORE ENDIF																; Common misspelling of the IATA Code for SVD - if encountered, sends the user back to try again.
+IF [To] = "KNI" THEN GOTO ONEMORE ENDIF																; Common misspelling of the IATA Code for KIN - if encountered, sends the user back to try again.
+IF [To] = "UFV" THEN GOTO ONEMORE ENDIF																; Common misspelling of the IATA Code for UVF - if encountered, sends the user back to try again.
+IF [To] = "VUF" THEN GOTO ONEMORE ENDIF																; Common misspelling of the IATA Code for UVF - if encountered, sends the user back to try again.
+IF [To] = "KFJ" THEN GOTO ONEMORE ENDIF																; Common misspelling of the IATA Code for JFK - if encountered, sends the user back to try again.
+IF [To] = "DMO" THEN GOTO ONEMORE ENDIF																; Common misspelling of the IATA Code for DOM - if encountered, sends the user back to try again.
+IF [To] = "ODM" THEN GOTO ONEMORE ENDIF																; Common misspelling of the IATA Code for DOM - if encountered, sends the user back to try again.
+IF [To] = "AXX" THEN GOTO ONEMORE ENDIF																; Common misspelling of the IATA Code for AXA - if encountered, sends the user back to try again.
+IF [To] = "MJB" THEN GOTO ONEMORE ENDIF																; Common misspelling of the IATA Code for MBJ - if encountered, sends the user back to try again.
+IF [To] = "JBM" THEN GOTO ONEMORE ENDIF																; Common misspelling of the IATA Code for MBJ - if encountered, sends the user back to try again.
+IF [To] = "BIG" THEN GOTO ONEMORE ENDIF																; Common misspelling of the IATA Code for BGI - if encountered, sends the user back to try again.
+;IF [To] = "BIG" THEN GOTO ONEMORE ENDIF
+;IF [To] = "BIG" THEN GOTO ONEMORE ENDIF
+
+
+; provide the User with an explanation of the process IF the 'Help' button is pressed.
+IF [@BTN_PRSD] = "HELP" THEN
+
+			WINDOW H=" Explantion  " R=01 C=25
+			In order to find the Taxes for your NDC Flight, we 
+			 need to interrogate Sabre to find out what the
+			 Taxes were when the Booking was originaly created, and
+			 then we have to COMPARE that amount with TODAYS Taxes.
+			 
+			 On the next Screen you must enter the following:
+			 From Airport: This is the REGIONAL Airport, i.e LHR
+			 To Airport: Enter the Destination, i.e. BGI
+			 Departure Date:  When the Flight Departs the UK
+			 Return Date: When the Flight returns to the UK
+			 Booking Date: This is the date the Flight was ORIGINALY booked
+			 Airline: This is the Airline - (Probably BA)
+			
+			All of the Info needed can be taken from VIBE
+			
+								[@OK]
+			ENDWINDOW
+	GOTO ONEMORE																					; Once the user has digested the Help info - send them back to be interrogated as to the NDC flight information.
+ENDIF
+
+; SVD has multiple routing options - if encountered - interrogate the user as to the routing;  Direct|Via
+IF [To] = "SVD" THEN
+
+			WINDOW H=" Clarification of Itinerary ROUTING  " R=01 C=25
+			^b*               ^R*																											 ^
+			You are booking to SVD
+	
+			^b*                 ^R*																											 ^		
+			Please Indicate the ROUTING:
+			
+			The PNR is Direct: [Direct#C]
+			
+			The PNR goes VIA: [Via#C]
+			
+							[@OK]
+			
+			ENDWINDOW
+			
+		IF [Direct#C] = "TRUE" THEN [Via] = "FALS"	 												; Boolean Value TRUE|FALS for VIA
+			DEFAULT [Via] = [Via] 
+		ENDIF	
+	
+	IF [Via#C] = "TRUE" THEN [Via] = "TRUE"	 														; Boolean Value TRUE|FALS for VIA
+		DEFAULT [Via] = [Via] 
+	ENDIF	
+		
+
+ENDIF	
+		
+
+; DOM has multiple routing options - if encountered - interrogate the user as to the routing;  Direct|Via
+IF [To] = "DOM" THEN
+
+			WINDOW H=" Clarification of Itinerary ROUTING  " R=01 C=25
+			^b*               ^R*																											 ^
+			You are booking to DOM
+	
+			^b*                 ^R*																											 ^		
+			Please Indicate the ROUTING:
+			
+			The PNR is Direct: [Direct#C]
+			
+			The PNR goes VIA: [Via#C]
+			
+							[@OK]
+			
+			ENDWINDOW
+		
+		IF [Direct#C] = "TRUE" THEN [Via] = "FALS"	 	 											; Boolean Value TRUE|FALS for VIA
+			DEFAULT [Via] = [Via] 
+		ENDIF	
+	
+	IF [Via#C] = "TRUE" THEN [Via] = "TRUE"	 	 													; Boolean Value TRUE|FALS for VIA
+		DEFAULT [Via] = [Via] 
+	ENDIF	
+		
+
+ENDIF
+
+
+
+
+»I{ENTER}«
+; In this section of the Code, we will Create the Passive PNR:
+
+IF [Via] = "TRUE" THEN																				; 
+		»1[Dep.Date][From][To]¥[Air]{ENTER}«														; Build the Passive O/B Sector from stored Variables
+		»01O1T2GK{ENTER}«																			;	Sell Passive Seat
+		»1[Ret.Date][To][From]¥[Air]{ENTER}«														; Build the Passive I/B Sector from stored Variables
+		»01T1O2GK{ENTER}«																			;	Sell Passive Seat
+	GOTO DIRECTJUMP
+ENDIF
+
+;                                                     												; APPLICABLE BOOKING CLASS - 1O 2T 3T 4O
+
+»1[Dep.Date][From][To]¥[Air]{ENTER}«
+»01M1GK{ENTER}«
+
+»1[Ret.Date][To][From]¥[Air]{ENTER}«
+»01M1GK{ENTER}«
+
+DIRECTJUMP:
+
+; All small taxed less YQ added together = ﾣ215.46
+
+
+; Get Today's Taxes ADT:
+
+»WPNCS{ENTER}«																						; Pricing Entry for Current Taxes
+
+READ F="EMUFIND:" R=02 C=2 "YQ "																	; Search the emulator for the string: "YQ "
+READ F="EMUFIND:" R=[@DATA_ROW] C=[@DATA_COL]-6 [WPNCSYQ.TAX], " "									; locates and reads the YQ Tax via coordinated provided.
+DEFAULT [WPNCSYQ.TAX] = [WPNCSYQ.TAX]																; Defaults the [WPNCSYQ.TAX] Data in the Variable so that it can be displayed in the Sabre Screen
+
+READ F="EMUFIND:" R=02 C=2 "XT "																	; Look for the Tax Total indicator 'XT'
+READ F="EMUFIND:" R=[@DATA_ROW] C=[@DATA_COL]-6 [WPNCSXT.TAX], " "									; Using the Tax Total Indicator, locate the XT Tax via coordinated provided.
+DEFAULT [WPNCSXT.TAX] = [WPNCSXT.TAX]																; Defaults the [WPNCSXT.TAX] Data in the Variable so that it can be displayed in the Sabre Screen
+
+
+[SmallWPNCSTaxes] = [WPNCSXT.TAX] - [WPNCSYQ.TAX]													; Defines the Value of [SmallWPNCSTaxes] by minusing [WPNCSYQ.TAX] from [WPNCSXT.TAX]
+DEFAULT [SmallWPNCSTaxes] = [SmallWPNCSTaxes] 														; Defaults the [SmallWPNCSTaxes] Data in the Variable so that it can be displayed in the Sabre Screen
+
+
+; Get Historical Taxes:
+
+»WPB[Booked]¥PJCB{ENTER}«																			; Using the DATE that the NDC PNR was created, Historically Price Quote the Passive PNR
+
+READ F="EMUFIND:" R=02 C=2 "YQ "																	; Search the emulator for the string: "YQ "
+READ F="EMUFIND:" R=[@DATA_ROW] C=[@DATA_COL]-6 [WPBYQ.TAX], " "									; locates and reads the YQ Tax via coordinated provided.
+DEFAULT [WPBYQ.TAX] = [WPBYQ.TAX]														     		; Defaults the [WPBYQ.TAX] Data in the Variable so that it can be displayed in the Sabre Screen
+
+READ F="EMUFIND:" R=02 C=2 "XT "																	; Search the emulator for the string: "XT "
+READ F="EMUFIND:" R=[@DATA_ROW] C=[@DATA_COL]-6 [WPBXT.TAX], " "									; locates and reads the XT Tax via coordinated provided.
+DEFAULT [WPBXT.TAX] = [WPBXT.TAX]														     		; Defaults the [WPBXT.TAX] Data in the Variable so that it can be displayed in the Sabre Screen
+
+
+[SmallWPBTaxes] = [WPBXT.TAX] - [WPBYQ.TAX]									        				; Defines the Value of [SmallWPBTaxes] by minusing [WPBYQ.TAX] from [WPBXT.TAX]
+
+DEFAULT [SmallWPBTaxes] = [SmallWPBTaxes] 									     					; Defaults the [SmallWPBTaxes] Data in the Variable so that it can be displayed in the Sabre Screen 
+
+
+; Find the amount for the agent to collect:
+[Collectable] = [SmallWPNCSTaxes] - [SmallWPBTaxes]									        		; Defines the Value of [Collectable] by minusing [SmallWPBTaxes] from [SmallWPNCSTaxes]
+DEFAULT [Collectable] = [Collectable]														     	; Defaults the [Collectable] Data in the Variable so that it can be displayed in the Sabre Screen
+
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Get Today's Taxes YTH:  - Please refer to the code explantions for ADT fares as the process is identical - only the PAX indicator Variable is different.
+
+»WPNCS¥PJ14{ENTER}«																					; Repeats the process for Youth Fares Variables are copied but a 'Y' is added at the end to define: Youth
+
+READ F="EMUFIND:" R=02 C=2 "YQ "
+READ F="EMUFIND:" R=[@DATA_ROW] C=[@DATA_COL]-6 [WPNCSYQ.TAY], " "
+DEFAULT [WPNCSYQ.TAY] = [WPNCSYQ.TAY]
+
+READ F="EMUFIND:" R=02 C=2 "XT "
+READ F="EMUFIND:" R=[@DATA_ROW] C=[@DATA_COL]-6 [WPNCSXT.TAY], " "
+DEFAULT [WPNCSXT.TAY] = [WPNCSXT.TAY]
+
+
+[SmallWPNCSTaxey] = [WPNCSXT.TAY] - [WPNCSYQ.TAY]
+DEFAULT [SmallWPNCSTaxey] = [SmallWPNCSTaxey] 
+
+; Get Historical Taxes:
+
+»WPB[Booked]¥PJ14{ENTER}«
+
+READ F="EMUFIND:" R=02 C=2 "YQ "
+READ F="EMUFIND:" R=[@DATA_ROW] C=[@DATA_COL]-6 [WPBYQ.TAY], " "
+DEFAULT [WPBYQ.TAY] = [WPBYQ.TAY]
+
+READ F="EMUFIND:" R=02 C=2 "XT "
+READ F="EMUFIND:" R=[@DATA_ROW] C=[@DATA_COL]-6 [WPBXT.TAY], " "
+DEFAULT [WPBXT.TAY] = [WPBXT.TAY]
+
+
+[SmallWPBTaxey] = [WPBXT.TAY] - [WPBYQ.TAY]
+DEFAULT [SmallWPBTaxey] = [SmallWPBTaxey] 
+
+
+
+[Collectably] = [SmallWPNCSTaxey] - [SmallWPBTaxey] 
+DEFAULT [Collectably] = [Collectably]
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Get Today's Taxes CHD:  - Please refer to the code explantions for ADT fares as the process is identical - only the PAX indicator Variable is different.
+
+»WPNCS¥PJNN{ENTER}«																					; Repeats the process for Child Fares Variables are copied but a 'C' is added at the end to define: Youth
+
+READ F="EMUFIND:" R=02 C=2 "YQ "
+READ F="EMUFIND:" R=[@DATA_ROW] C=[@DATA_COL]-6 [WPNCSYQ.TAC], " "
+DEFAULT [WPNCSYQ.TAC] = [WPNCSYQ.TAC]
+
+READ F="EMUFIND:" R=02 C=2 "XT "
+READ F="EMUFIND:" R=[@DATA_ROW] C=[@DATA_COL]-6 [WPNCSXT.TAC], " "
+DEFAULT [WPNCSXT.TAC] = [WPNCSXT.TAC]
+
+
+[SmallWPNCSTaxec] = [WPNCSXT.TAC] - [WPNCSYQ.TAC]
+DEFAULT [SmallWPNCSTaxec] = [SmallWPNCSTaxec] 
+
+
+; Get Historical Taxes:
+
+»WPB[Booked]¥PJNN{ENTER}«
+
+READ F="EMUFIND:" R=02 C=2 "YQ "
+READ F="EMUFIND:" R=[@DATA_ROW] C=[@DATA_COL]-6 [WPBYQ.TAC], " "
+DEFAULT [WPBYQ.TAC] = [WPBYQ.TAC]
+
+READ F="EMUFIND:" R=02 C=2 "XT "
+READ F="EMUFIND:" R=[@DATA_ROW] C=[@DATA_COL]-6 [WPBXT.TAC], " "
+DEFAULT [WPBXT.TAC] = [WPBXT.TAC]
+
+[SmallWPBTaxec] = [WPBXT.TAC] - [WPBYQ.TAC]
+DEFAULT [SmallWPBTaxec] = [SmallWPBTaxec] 
+
+[Collectablc] = [SmallWPNCSTaxec] - [SmallWPBTaxec] 
+DEFAULT [Collectablc] = [Collectablc]
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Get Today's Taxes INF:  - Please refer to the code explantions for ADT fares as the process is identical - only the PAX indicator Variable is different.
+
+»WPNCS¥PJNF{ENTER}«																					; Repeats the process for Infant Fares Variables are copied but an 'I' is added at the end to define: Youth
+
+READ F="EMUFIND:" R=02 C=2 "YQ "
+READ F="EMUFIND:" R=[@DATA_ROW] C=[@DATA_COL]-5 [WPNCSYQ.TAI], " "
+DEFAULT [WPNCSYQ.TAI] = [WPNCSYQ.TAI]
+
+READ F="EMUFIND:" R=02 C=2 "XT "
+READ F="EMUFIND:" R=[@DATA_ROW] C=[@DATA_COL]-5 [WPNCSXT.TAI], " "
+DEFAULT [WPNCSXT.TAI] = [WPNCSXT.TAI]
+
+
+[SmallWPNCSTaxei] = [WPNCSXT.TAI] - [WPNCSYQ.TAI]
+DEFAULT [SmallWPNCSTaxei] = [SmallWPNCSTaxei] 
+
+
+; Get Historical Taxes:
+
+»WPB[Booked]¥PJNF{ENTER}«
+
+READ F="EMUFIND:" R=02 C=2 "YQ "
+READ F="EMUFIND:" R=[@DATA_ROW] C=[@DATA_COL]-5 [WPBYQ.TAI], " "
+DEFAULT [WPBYQ.TAI] = [WPBYQ.TAI]
+
+READ F="EMUFIND:" R=02 C=2 "XT "
+READ F="EMUFIND:" R=[@DATA_ROW] C=[@DATA_COL]-5 [WPBXT.TAI], " "
+DEFAULT [WPBXT.TAI] = [WPBXT.TAI]
+
+
+[SmallWPBTaxei] = [WPBXT.TAI] - [WPBYQ.TAI]
+DEFAULT [SmallWPBTaxei] = [SmallWPBTaxei] 
+
+[Collectabli] = [SmallWPNCSTaxei] - [SmallWPBTaxei] 
+DEFAULT [Collectabli] = [Collectabli]
+
+
+;WINDOW
+;ADT Today's Tax: [SmallWPNCSTaxes] Hist.  Tax: [SmallWPBTaxes] Difference: [Collectable]
+;ADT
+;XT = [WPNCSXT.TAX]
+;YQ = [WPNCSYQ.TAX]
+;SmallWPNCSTaxes = [SmallWPNCSTaxes] 
+
+;YTH
+;XT = [WPNCSXT.TAY]
+;YQ = [WPNCSYQ.TAY]
+;SmallWPNCSTaxey = [SmallWPNCSTaxey] 
+
+;CHD
+;XT = [WPNCSXT.TAC]
+;YQ = [WPNCSYQ.TAC]
+;SmallWPNCSTaxec = [SmallWPNCSTaxec] 
+
+;INF
+;XT = [WPNCSXT.TAI]
+;YQ = [WPNCSYQ.TAI]
+;SmallWPNCSTaxei = [SmallWPNCSTaxei] 
+;ENDWINDOW
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+DEFINE [Vibe=A/N:8:OPT:::]
+DEFINE [Error=ANY:40:OPT:::]
+
+
+WINDOW H=" Deficit Calculation " R=01 C=25
+^R*   ^b*							 ^B*															^	
+Adult Today's Tax: [SmallWPNCSTaxes] Historical Tax: [SmallWPBTaxes] Difference: [Collectable]
+^R*   ^b*							 ^B*															^	
+Youth Today's Tax: [SmallWPNCSTaxey] Historical Tax: [SmallWPBTaxey] Difference: [Collectably]
+^R*   ^b*							 ^B*															^	
+Child Today's Tax: [SmallWPNCSTaxec] Historical Tax: [SmallWPBTaxec] Difference: [Collectablc]
+^R*   ^b*							 ^B*															^	
+Inf   Today's Tax: [SmallWPNCSTaxei] Historical Tax: [SmallWPBTaxei] Difference: [Collectabli]
+
+^R*                             ^b*                                                                                              ^
+NOTE: Amnts quoted are PER Pax, (Add to the Markup in Pen)
+
+^B*            										    ^
+ADT Amount to Collect:  [Collectable]
+^B*            										    ^
+YTH Amount to Collect:  [Collectably]
+^B*            										    ^
+CHD Amount to Collect:  [Collectablc]
+^B*            										    ^
+INF Amount to Collect:  [Collectabli]
+
+[@BTN_L10_0]		  [@BTN_L10_3]			[@BTN_8_0]				
+ENDWINDOW
+
+
+
+IF [@BTN_PRSD] = "Breakdown" THEN																	; Provide the User with an explanation of the process IF the 'Breakdown' button is pressed.
+
+		WINDOW H=" Process Breakdown " R=01 C=25
+		^B*            																					    ^
+		How is the Calculation performed?
+		
+		 The Clients Booking was held on [Booked]
+		The Total TAXES on that day (for an Adult) were [WPBXT.TAX]
+		We do not include the YQ Taxes for this calulation as the Ticket 
+		 is issued at the ORIGINAL YQ amount. FYI: The original YQ was: [WPBYQ.TAX]
+		So, the Total Historical Taxes MINUS the YQ = [SmallWPBTaxes] (Amount 1)
+		
+		Next we Calculate TODAYS Total Tax which is: [WPNCSXT.TAX]
+		 Then we MINUS Todays YQ. FYI: Todays YQ is: [WPNCSYQ.TAX] which gives: 
+		So, the Total Current Taxes MINUS the YQ = [SmallWPNCSTaxes] (Amount 2)
+		
+		Next we compare Amount 1 and Amount 2 to find a deficit of: [Collectable]
+		
+		^b*            	   ^B*^b*		     																																    			   ^
+		Remember: Taxes are NOT guaranteed - this is in our Terms and Conditions.
+		
+		Do you wish to EMAIL this information to yourself? [Email#C]
+		
+													[@OK]
+		
+		ENDWINDOW
+		
+ENDIF	
+
+	
+		
+IF [@BTN_PRSD] = "Feedback" THEN																	; Provide the User with a forum to provide +, -, or general feedback on the process IF the 'Feedback' button is pressed.	
+
+		WINDOW H=" Feedback " R=01 C=25
+		^b*             																					  																		  ^
+		If you beleive that there is an error in the Tax Calculation
+		^b*             																					   																			 ^
+		Please provide me with the following details:
+		^R*   ^b*          																					  																							  ^
+		1 Vibe Reference:	[Vibe]
+		^R* 
+		2 Error: [Error]
+		 
+		^b* 
+		The next screen will generate an email, please hit the 'Send# button.
+		 
+		^b* 
+		Thanks for your feedback!
+		 
+		[@BTN_L15_0]
+		ENDWINDOW 
+	GOTO EMAIL
+ENDIF
+
+IF [@BTN_PRSD] = "Finish" THEN
+	EXIT
+ENDIF
+
+; Generate an email to be sent detailing feedback provided.
+
+EMAIL:
+WRITE F="EMAIL:to" "*******"  
+
+WRITE F="EMAIL:subject" "Tax Problem."
+WRITE F="EMAIL:body" "Vibe Ref:  "  + [Vibe] +  "     \n\n" 
+WRITE F="EMAIL:body" "Error:  "  + [Error] +  "     \n\n" 
+CLOSE "EMAIL:create" 
